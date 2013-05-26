@@ -15,12 +15,10 @@ use Monolog\TestCase;
 use Monolog\Logger;
 
 /**
- * Almost all examples (expected header, titles, messages) taken from
- * https://www.pushover.net/api
- * @author Sebastian Göttschkes <sebastian.goettschkes@googlemail.com>
- * @see https://www.pushover.net/api
+ * @author Rafael Dohms <rafael@doh.ms>
+ * @see    https://www.hipchat.com/docs/api
  */
-class PushoverHandlerTest extends TestCase
+class HipChatHandlerTest extends TestCase
 {
 
     private $res;
@@ -33,7 +31,7 @@ class PushoverHandlerTest extends TestCase
         fseek($this->res, 0);
         $content = fread($this->res, 1024);
 
-        $this->assertRegexp('/POST \/1\/messages.json HTTP\/1.1\\r\\nHost: api.pushover.net\\r\\nContent-Type: application\/x-www-form-urlencoded\\r\\nContent-Length: \d{2,4}\\r\\n\\r\\n/', $content);
+        $this->assertRegexp('/POST \/v1\/rooms\/message\?format=json&auth_token=.* HTTP\/1.1\\r\\nHost: api.hipchat.com\\r\\nContent-Type: application\/x-www-form-urlencoded\\r\\nContent-Length: \d{2,4}\\r\\n\\r\\n/', $content);
 
         return $content;
     }
@@ -43,17 +41,7 @@ class PushoverHandlerTest extends TestCase
      */
     public function testWriteContent($content)
     {
-        $this->assertRegexp('/token=myToken&user=myUser&message=test1&title=Monolog&timestamp=\d{10}$/', $content);
-    }
-
-    public function testWriteWithComplexTitle()
-    {
-        $this->createHandler('myToken', 'myUser', 'Backup finished - SQL1');
-        $this->handler->handle($this->getRecord(Logger::CRITICAL, 'test1'));
-        fseek($this->res, 0);
-        $content = fread($this->res, 1024);
-
-        $this->assertRegexp('/title=Backup\+finished\+-\+SQL1/', $content);
+        $this->assertRegexp('/from=Monolog&room_id=room1&notify=0&message=test1&message_format=text&color=red$/', $content);
     }
 
     public function testWriteWithComplexMessage()
@@ -66,25 +54,39 @@ class PushoverHandlerTest extends TestCase
         $this->assertRegexp('/message=Backup\+of\+database\+%22example%22\+finished\+in\+16\+minutes\./', $content);
     }
 
-    public function testWriteWithTooLongMessage()
+    /**
+     * @dataProvider provideLevelColors
+     */
+    public function testWriteWithErrorLevelsAndColors($level, $expectedColor)
     {
-        $message = str_pad('test', 520, 'a');
         $this->createHandler();
-        $this->handler->handle($this->getRecord(Logger::CRITICAL, $message));
+        $this->handler->handle($this->getRecord($level, 'Backup of database "example" finished in 16 minutes.'));
         fseek($this->res, 0);
         $content = fread($this->res, 1024);
 
-        $expectedMessage = substr($message, 0, 505);
-
-        $this->assertRegexp('/message=' . $expectedMessage . '&title/', $content);
+        $this->assertRegexp('/color='.$expectedColor.'/', $content);
     }
 
-    private function createHandler($token = 'myToken', $user = 'myUser', $title = 'Monolog')
+    public function provideLevelColors()
     {
-        $constructorArgs = array($token, $user, $title);
+        return array(
+            array(Logger::DEBUG,    'gray'),
+            array(Logger::INFO,     'green'),
+            array(Logger::WARNING,  'yellow'),
+            array(Logger::ERROR,    'red'),
+            array(Logger::CRITICAL, 'red'),
+            array(Logger::ALERT,    'red'),
+            array(Logger::EMERGENCY,'red'),
+            array(Logger::NOTICE,   'green'),
+        );
+    }
+
+    private function createHandler($token = 'myToken', $room = 'room1', $name = 'Monolog', $notify = false)
+    {
+        $constructorArgs = array($token, $room, $name, $notify, Logger::DEBUG);
         $this->res = fopen('php://memory', 'a');
         $this->handler = $this->getMock(
-            '\Monolog\Handler\PushoverHandler',
+            '\Monolog\Handler\HipChatHandler',
             array('fsockopen', 'streamSetTimeout', 'closeSocket'),
             $constructorArgs
         );
